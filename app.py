@@ -71,11 +71,11 @@ def capture_face_image():
     cv2.destroyAllWindows()
     return None
 
-def extract_face_encoding(image_path):
-    """Returns the first face encoding found in the image."""
+def extract_face_encodings(image_path):
+    """Returns all face encodings found in the image."""
     img = face_recognition.load_image_file(image_path)
     encodings = face_recognition.face_encodings(img)
-    return encodings[0] if encodings else None
+    return encodings
 
 # ---------------- ROUTES ----------------
 @app.route("/")
@@ -101,8 +101,8 @@ def signup():
             flash("Face capture failed.", "danger")
             return render_template("signup.html")
 
-        encoding = extract_face_encoding(img_path)
-        if encoding is None:
+        encodings = extract_face_encodings(img_path)
+        if not encodings:
             flash("No face detected. Try again.", "danger")
             return render_template("signup.html")
 
@@ -113,10 +113,25 @@ def signup():
 
         try:
             cur = conn.cursor()
-            cur.execute(
-                "INSERT INTO users (full_name, username, encoding) VALUES (%s,%s,%s)",
-                (full_name, username, json.dumps(encoding.tolist()))
-            )
+
+            # Check if user already exists
+            cur.execute("SELECT encoding FROM users WHERE username = %s", (username,))
+            row = cur.fetchone()
+
+            if row:
+                # User exists → append new encoding to list
+                encoding_list = json.loads(row[0])
+                encoding_list.extend([e.tolist() for e in encodings])
+                cur.execute("UPDATE users SET encoding = %s WHERE username = %s",
+                            (json.dumps(encoding_list), username))
+            else:
+                # New user → store all encodings as list
+                encoding_list = [e.tolist() for e in encodings]
+                cur.execute(
+                    "INSERT INTO users (full_name, username, encoding) VALUES (%s,%s,%s)",
+                    (full_name, username, json.dumps(encoding_list))
+                )
+
             conn.commit()
             cur.close()
             conn.close()
@@ -141,8 +156,9 @@ def login():
             flash("Could not access camera.", "danger")
             return render_template("login.html")
 
-        encoding = extract_face_encoding(img_path)
-        if encoding is None:
+        # Extract all encodings from the captured image
+        encodings = extract_face_encodings(img_path)
+        if not encodings:
             flash("No face detected. Try again.", "danger")
             return render_template("login.html")
 
@@ -162,20 +178,31 @@ def login():
             flash("Database fetch error.", "danger")
             return render_template("login.html")
 
-        # Compare captured face with all user encodings
-        for full_name, username, encoding_blob in rows:
-            db_encoding = json.loads(encoding_blob)
-            match = face_recognition.compare_faces([db_encoding], encoding)[0]
-            distance = face_recognition.face_distance([db_encoding], encoding)[0]
-            if match and distance < 0.4:
-                session["user"] = f"{full_name} ({username})"
-                flash(f"Welcome, {full_name}!", "success")
-                return redirect(url_for("dashboard"))
+        recognized_users = []
 
-        flash("Face not recognized. Try again or sign up.", "danger")
-        return render_template("login.html")
+        # Compare each detected face with all user encodings
+        for encoding in encodings:
+            for full_name, username, encoding_blob in rows:
+                db_encodings = json.loads(encoding_blob)  # this is now a list of encodings
+                matches = face_recognition.compare_faces(db_encodings, encoding, tolerance=0.4)
+                distances = face_recognition.face_distance(db_encodings, encoding)
+
+                # Check if any encoding matched strongly
+                for match, dist in zip(matches, distances):
+                    if match and dist < 0.4:
+                        recognized_users.append(f"{full_name} ({username})")
+                        break  # Stop at first match for this user
+
+        if recognized_users:
+            session["user"] = ", ".join(set(recognized_users))
+            flash(f"Recognized: {session['user']}", "success")
+            return redirect(url_for("dashboard"))
+        else:
+            flash("No registered faces recognized.", "danger")
+            return render_template("login.html")
 
     return render_template("login.html")
+
 
 @app.route("/dashboard")
 def dashboard():

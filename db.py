@@ -1,6 +1,7 @@
 # db.py
 import mysql.connector
 from mysql.connector import Error
+import json
 
 # Update these to match your XAMPP/MySQL credentials
 DB_CONFIG = {
@@ -24,7 +25,7 @@ def get_db_connection():
 
 def init_db():
     """
-    Optional: Creates the 'users' table if not exists.
+    Creates the 'users' table if not exists.
     Run this once at the start.
     """
     conn = get_db_connection()
@@ -39,7 +40,7 @@ def init_db():
             id INT AUTO_INCREMENT PRIMARY KEY,
             full_name VARCHAR(100) NOT NULL,
             username VARCHAR(100) UNIQUE NOT NULL,
-            encoding LONGBLOB NOT NULL
+            encoding LONGTEXT NOT NULL
         )
         """)
         conn.commit()
@@ -51,10 +52,10 @@ def init_db():
         conn.close()
 
 
-def insert_user(full_name, username, encoding_bytes):
+def insert_user(full_name, username, encoding_list):
     """
-    Insert a new user with face encoding.
-    encoding_bytes: bytes object
+    Insert a new user with face encoding(s).
+    encoding_list: Python list (will be converted to JSON)
     """
     conn = get_db_connection()
     if not conn:
@@ -64,7 +65,7 @@ def insert_user(full_name, username, encoding_bytes):
     try:
         cursor.execute(
             "INSERT INTO users (full_name, username, encoding) VALUES (%s, %s, %s)",
-            (full_name, username, encoding_bytes)
+            (full_name, username, json.dumps(encoding_list))
         )
         conn.commit()
         return True
@@ -76,9 +77,34 @@ def insert_user(full_name, username, encoding_bytes):
         conn.close()
 
 
+def update_user_encodings(username, encoding_list):
+    """
+    Update existing user's encodings (replace with new list).
+    """
+    conn = get_db_connection()
+    if not conn:
+        return False
+
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "UPDATE users SET encoding = %s WHERE username = %s",
+            (json.dumps(encoding_list), username)
+        )
+        conn.commit()
+        return True
+    except Error as e:
+        print(f"[DB] update_user_encodings error: {e}")
+        return False
+    finally:
+        cursor.close()
+        conn.close()
+
+
 def get_all_users():
     """
-    Returns a list of tuples: (full_name, username, encoding_bytes)
+    Returns a list of tuples: (full_name, username, encoding_json)
+    encoding_json must be parsed with json.loads() in app.py
     """
     conn = get_db_connection()
     if not conn:
