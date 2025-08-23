@@ -9,8 +9,16 @@
 
   <div class="container mt-5">
     <div class="card shadow p-4">
-      <h2>Welcome, {{ user }}!</h2>
-      <p>You have successfully logged in using face recognition.</p>
+      <h2 class="mb-3 text-success">Welcome!</h2>
+      <p class="lead">The following user(s) have successfully logged in using face recognition:</p>
+
+      <!-- Display multiple recognized users -->
+      <ul class="list-group mb-3">
+        {% for u in user.split(', ') %}
+          <li class="list-group-item">{{ u }}</li>
+        {% endfor %}
+      </ul>
+
       <a href="{{ url_for('logout') }}" class="btn btn-danger">Logout</a>
     </div>
   </div>
